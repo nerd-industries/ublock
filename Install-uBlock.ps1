@@ -15,8 +15,7 @@
     uBlock Origin Lite is set to the "Complete" filtering mode by policy.
 
     Chrome and Edge have NO policy that turns on "Allow in Incognito/InPrivate",
-    so when a tech is running this interactively the script opens each
-    browser's extension page so the toggle is two clicks away.
+    so that toggle is flipped by hand afterwards (the script reminds you).
 
 .NOTES
     Run:  irm ublock.nerdyneighbor.net | iex        (elevated Windows PowerShell)
@@ -84,17 +83,6 @@ function Write-Log {
 # Interactive = a tech in a console, not SYSTEM from the RMM.
 $me = [Security.Principal.WindowsIdentity]::GetCurrent()
 $script:Interactive = [Environment]::UserInteractive -and -not $me.IsSystem -and -not [Console]::IsInputRedirected
-
-# The person logged on to the desktop (may differ from the elevated account).
-function Get-DesktopUser {
-    $name = (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
-    if (-not $name) { return $null }
-    try {
-        $sid  = ([Security.Principal.NTAccount]$name).Translate([Security.Principal.SecurityIdentifier]).Value
-        $prof = Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue
-        return [pscustomobject]@{ Name = $name; Sid = $sid; Profile = $prof.LocalPath }
-    } catch { return [pscustomobject]@{ Name = $name; Sid = $null; Profile = $null } }
-}
 
 # --- Browser detection -------------------------------------------------------------
 # "Installed" = the browser's program file exists AND Windows has it registered
@@ -185,7 +173,7 @@ function Set-LiteComplete([string]$PolicyKey, [string]$Id) {
     Set-Reg "$PolicyKey\3rdparty\extensions\$Id\policy" 'defaultFiltering' 'complete'
 }
 
-# --- Browser restart + "Allow in Incognito" page ------------------------------------
+# --- Browser restart ----------------------------------------------------------------
 $ProcName = @{ Edge = 'msedge'; Chrome = 'chrome'; Firefox = 'firefox' }
 
 function Restart-Browsers([string[]]$Names) {
@@ -205,38 +193,6 @@ function Restart-Browsers([string[]]$Names) {
     Start-Sleep -Seconds 2
     Write-Log ("Closed {0}." -f ($running -join ', '))
     return $true
-}
-
-# Launch something as the desktop user, NOT elevated. Starting a browser from
-# this admin console would run it as admin (and maybe as the wrong account).
-function Start-AsDesktopUser([string]$Exe, [string]$Arguments, $User) {
-    $task = 'NN-uBlock-Open-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $act  = if ($Arguments) { New-ScheduledTaskAction -Execute $Exe -Argument $Arguments } else { New-ScheduledTaskAction -Execute $Exe }
-    $prin = New-ScheduledTaskPrincipal -UserId $User.Name -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $task -Action $act -Principal $prin -Force | Out-Null
-    Start-ScheduledTask -TaskName $task
-    Start-Sleep -Seconds 2
-    Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
-}
-
-function Open-IncognitoToggle([string]$Browser, [string]$Exe, [string]$Id, $User) {
-    $scheme  = if ($Browser -eq 'Edge') { 'edge' } else { 'chrome' }
-    $dataDir = if ($Browser -eq 'Edge') { 'Microsoft\Edge\User Data' } else { 'Google\Chrome\User Data' }
-    $label   = if ($Browser -eq 'Edge') { 'Allow in InPrivate' } else { 'Allow in Incognito' }
-
-    # Start the browser so policy installs the extension, then wait for it to land.
-    Start-AsDesktopUser $Exe '' $User
-    $extDir = if ($User.Profile) { Join-Path $User.Profile "AppData\Local\$dataDir\Default\Extensions\$Id" }
-    $ok = $false
-    for ($i = 0; $i -lt 45 -and $extDir; $i++) {
-        if (Test-Path $extDir) { $ok = $true; break }
-        Start-Sleep -Seconds 2
-    }
-    if ($ok) { Write-Log "$Browser installed the extension." 'OK' }
-    else     { Write-Log "$Browser hasn't finished installing yet - the page may be empty for a few seconds." 'WARN' }
-
-    Start-AsDesktopUser $Exe "${scheme}://extensions/?id=$Id" $User
-    Write-Host ("  >> In {0}: turn ON '{1}' on the page that just opened." -f $Browser, $label) -ForegroundColor Cyan
 }
 
 # --- Revert ---------------------------------------------------------------------------
@@ -332,21 +288,12 @@ try {
     Set-Reg $StateKey 'LastRun' (Get-Date -Format s)
     Set-Reg $StateKey 'EdgeMode' $edgeMode
 
-    # Apply now: restart the browsers, then (interactive only) open the
-    # extension page in Chrome/Edge for the Incognito/InPrivate toggle.
-    $restarted = Restart-Browsers $done
-    $chromium  = $done | Where-Object { $_ -in 'Edge', 'Chrome' }
-    if ($script:Interactive -and $chromium) {
-        $user = Get-DesktopUser
-        if (-not $user) {
-            Write-Log "No one is logged on to the desktop - skipping the Incognito/InPrivate pages." 'WARN'
-        } elseif ($restarted -or -not ($chromium | Where-Object { Get-Process $ProcName[$_] -ErrorAction SilentlyContinue })) {
-            Write-Host ""
-            if ('Edge' -in $chromium)   { Open-IncognitoToggle 'Edge'   $browsers.Edge   $edgeExt.Id         $user }
-            if ('Chrome' -in $chromium) { Open-IncognitoToggle 'Chrome' $browsers.Chrome $Ext.ChromeLite.Id $user }
-        }
-    } elseif ($chromium) {
-        Write-Log "Chrome/Edge 'Allow in Incognito/InPrivate' can't be set by policy - turn it on at the browser's extensions page." 'WARN'
+    # Apply now: extensions install once each browser fully restarts.
+    Restart-Browsers $done | Out-Null
+    $chromium = @($done | Where-Object { $_ -in 'Edge', 'Chrome' })
+    if ($chromium) {
+        Write-Host ""
+        Write-Log ("Manual step: in {0}, open the extensions page, click uBlock > Details, and turn on 'Allow in Incognito' (Edge: 'Allow in InPrivate')." -f ($chromium -join ' and ')) 'WARN'
     }
 
     Write-Host ""

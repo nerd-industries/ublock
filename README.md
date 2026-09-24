@@ -43,9 +43,9 @@ Also available in the menu: `irm toolkit.nerdyneighbor.net | iex`.
    (`3rdparty\extensions\<id>\policy\defaultFiltering = complete`).
 4. **Private browsing:**
    - Firefox: enabled by policy (`private_browsing: true`, Firefox 136+).
-   - Chrome/Edge: **no policy can do this.** When a tech runs the script interactively, it
-     restarts the browser as the logged-on user and opens the extension's page.
-     Turn on **Allow in Incognito** / **Allow in InPrivate** there.
+   - Chrome/Edge: **no policy can do this, so it's a manual step.** Open the extensions page,
+     click uBlock > Details, and turn on **Allow in Incognito** / **Allow in InPrivate**.
+     The script prints this reminder at the end.
 5. **Edge + full uBO:** sets `ExtensionManifestV2Availability = 2` (only if it isn't already set)
    so the Manifest V2 extension keeps running.
 6. Asks before closing browsers (it never closes them when run from the RMM). Logs to
@@ -57,8 +57,5 @@ Also available in the menu: `irm toolkit.nerdyneighbor.net | iex`.
   extensions for consumers by the end of 2026. After that, re-run with `NN_EDGE=lite`, or flip
   `$EdgeDefault` in the script to `'lite'` and push.
 - Browsers show "Managed by your organization" because policies are in use.
-- The Incognito/InPrivate toggle only covers the **Default** browser profile. Extra profiles
-  need the toggle flipped by hand.
-- Run from SuperOps (SYSTEM), everything except the Chrome/Edge incognito toggle still
-  applies. Extensions install the next time each browser is fully closed and reopened.
+- Run from SuperOps (SYSTEM), it never closes browsers. Extensions install the next time each browser is fully closed and reopened.
 - Revert removes the policies but leaves uBlock installed. The user can then remove it normally.
